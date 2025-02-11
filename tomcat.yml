@@ -1,0 +1,99 @@
+---
+# configuring tomcat
+
+- name: "Install Apache Tomcat"
+  hosts: my_server1
+  become: true
+
+  vars:
+    tomcat_version: "10.1.34"
+    tomcat_user: "tomcat"
+    tomcat_group: "tomcat"
+    install_dir: "/opt/tomcat"
+    tomcat_admin_user: "admin"
+    tomcat_admin_password: "123admin456"
+
+  tasks:
+    - name: "Installing Java"
+      apt:
+        name: openjdk-17-jdk
+        update_cache: yes
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: "Addling tomcat group"
+      group: 
+        name: "{{ tomcat_group }}"
+        state: present
+
+    - name: "adding user tomcat"
+      user:
+        name: "{{ tomcat_user }}"
+        group: "{{ tomcat_group }}"
+        home: "{{ install_dir }}"
+        shell: /bin/false
+
+    - name: "downloading tomcat"
+      get_url:
+        url: https://downloads.apache.org/tomcat/tomcat-10/v{{ tomcat_version }}/bin/apache-tomcat-10.1.34.tar.gz 
+        dest: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
+
+    - name: "create tomcat directory"
+      file:
+        path: "{{ install_dir }}"
+        state: directory
+        owner: "{{ tomcat_user }}"
+        group: "{{ tomcat_group }}"
+        mode: "0755"
+
+    - name: "extract tomcat"
+      unarchive:
+        src: "/tmp/apache-tomcat-{{ tomcat_version }}.tar.gz"
+        dest: "{{ install_dir }}"
+        remote_src: yes
+        extra_opts: [--strip-components=1]
+
+    - name: "permission for tomcat directory"
+      file:
+        path: "{{ install_dir }}"
+        owner: "{{ tomcat_user }}"
+        group: "{{ tomcat_group }}"
+        mode: "0755"
+        recurse: yes
+
+    - name: "Deply tomcat-users.xml" 
+      template:
+        src: "tomcat-users.xml.j2"
+        dest: "{{ install_dir }}/conf/tomcat-users.xml"
+        owner: "{{ tomcat_user }}"
+        group: "{{ tomcat_group }}"
+        mode: "0644"
+
+    - name: "Deploy systemd service file"
+      template:
+        src: "tomcat.service.j2"
+        dest: "/etc/systemd/system/tomcat.service"
+        mode: "0644"
+
+    - name: "Allow remote access to Tomcat Manager"
+      replace:
+        path: "{{ install_dir }}/webapps/manager/META-INF/context.xml"
+        regexp: '(<Valve className="org.apache.catalina.valves.RemoteAddrValve".*?/>)'
+        replace: '<!-- Removed access restriction -->'
+
+    - name: "Allow remote access to Tomcat Host Manager"
+      replace:
+        path: "{{ install_dir }}/webapps/host-manager/META-INF/context.xml"
+        regexp: '<Valve className="org.apache.catalina.valves.RemoteAddrValve".*?/>'
+        replace: '<!-- Removed access restriction -->'
+
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Start and Enable Tomcat service
+      systemd:
+        name: tomcat
+        state: started
+        enabled: yes
